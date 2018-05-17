@@ -8,9 +8,6 @@ stm32f7_binary_dir = 'TestBinaries/STM32F7xxx'
 
 
 class STM32BinaryFlasher():
-    # Add more as needed
-    
-
     def __init__(self, binaries_dir):
         self.binary_root = binaries_dir
         self.device = {}
@@ -48,7 +45,6 @@ class STM32BinaryFlasher():
         string = probe_data[self._index_of_substring(probe_data, 'chipid')].split(" ")
         self.device["chip_id"] = int(string[1], 16)
 
-    
     def check_connection(self, expected_device):
         if expected_device not in self.supported_devices.keys():
             print("Unrecognized device type, exiting.")
@@ -81,4 +77,4 @@ if __name__ == "__main__":
     flasher = STM32BinaryFlasher(stm32f7_binary_dir)
 
     flasher.check_connection("STM32F76xx")
-    flasher.flash_device("ChimeraDevelopment.bin", "0x80000000")
+    flasher.flash_device("ChimeraDevelopment.bin", "0x08000000")
