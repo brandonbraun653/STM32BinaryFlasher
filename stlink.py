@@ -1,7 +1,7 @@
-import sys
 import os
 import re
 import json
+import time
 import subprocess
 
 
@@ -92,6 +92,22 @@ class STLink_USBInterface:
         :param device_data: One of the devices from found_devices()
         """
         self.attached_device = device_data
+
+    def attach_device_by_serial(self, serial_number):
+        """
+        Attaches an STLink device by serial number
+        :param serial_number: Serial number of device to be attached
+        """
+        if self.stlink_devices:
+            for i in range(0, len(self.stlink_devices)):
+                if self.stlink_devices[i]["serial"] == serial_number:
+                    self.attached_device = self.stlink_devices[i]
+                    print("Device attached.")
+                    return
+
+            print("Could not find device with serial number %s" % serial_number)
+        else:
+            raise RuntimeError("Currently no STLink devices available. Have you run discover_devices() yet?")
 
     def get_port_from_serial(self, serial):
         assert(isinstance(serial, int))
@@ -242,6 +258,7 @@ class STLink:
         """
         command = "export STLINK_DEVICE=" + self.stlink.port + "; st-flash erase"
         subprocess.run(command, shell=True)
+        time.sleep(1)
 
     def flash(self, binary_file, link_address="0x08000000"):
         """
@@ -251,6 +268,7 @@ class STLink:
         """
         command = "export STLINK_DEVICE=" + self.stlink.port + "; st-flash write " + binary_file + " " + link_address
         subprocess.run(command, shell=True)
+        time.sleep(1)
 
     def reset(self):
         """
@@ -258,6 +276,7 @@ class STLink:
         """
         command = "export STLINK_DEVICE=" + self.stlink.port + "; st-flash reset"
         subprocess.run(command, shell=True)
+        time.sleep(1)
 
 
 if __name__ == "__main__":
