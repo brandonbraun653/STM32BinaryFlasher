@@ -5,11 +5,9 @@ import json
 import subprocess
 
 
-
-
 class STLink_USBInterface:
     """
-    A lower level object that is intended to provide an OS independent (between Windows/Linux)
+    A lower-ish level object that is intended to provide an OS independent (between Windows/Linux)
     interface for finding and gathering information on connected STLink programmers.
     """
     STLINK_VENDOR_ID = '0483'
@@ -31,60 +29,98 @@ class STLink_USBInterface:
     ]
 
     def __init__(self):
-        # Container holding gathered device data
         self.stlink_devices = []
         self.usb_devices = None
-
-        # The loaded device to be used for all attributes
         self.attached_device = {}
 
     def discover_devices(self):
         """
-        Finds all connected STLink devices and populates information about them
-        :param core_filter:
-        :param chip_filter:
-        :return:
+        Finds all connected STLink devices and populates information about them into the
+        class self.stlink_devices list.
         """
         # First let the STLink firmware discover devices
         self._stlink_probe()
 
         if self.stlink_devices:
+            print("Discovered %d STLink device(s)." % len(self.stlink_devices))
 
-            # Grab lower level information about the USB devices (port, devid, etc)
+            # Grab lower level information about the USB devices (port, dev-id, etc)
             self._get_usb_devices()
 
-            # Use the information from STLink and USB to build a more complete picture
+            # Use the information from STLink probe and USB to build a more complete picture
             # of which device is on which port
             self._assign_port_to_device()
 
-    def save_device(self, name, device_data, filename):
-        device_data['name'] = name
+        else:
+            print("No STLink devices were discovered.")
 
-        with open(filename+'.json', 'w') as fp:
-            json.dump(device_data, fp)
+    def save_device(self, name, filename):
+        """
+        Saves an attached device settings to file
+        :param name: A unique friendly name for this device
+        :param filename: where to save the file (must include .json extension)
+        """
+        if self.attached_device:
+            self.attached_device['name'] = name
+
+            if filename.endswith(".json"):
+                with open(filename, 'w') as file:
+                    json.dump(self.attached_device, file)
+            else:
+                raise ValueError("Could not save file. Expected a .json extension.")
+
+        else:
+            print("No device attached to the USB interface. Nothing to save!")
 
     def load_device(self, filename):
-        with open(filename) as file:
-            self.attached_device = json.loads(file.read())
+        """
+        Loads a previously saved device settings json file
+        :param filename: Location of the settings file
+        """
+
+        if filename.endswith(".json"):
+            with open(filename) as file:
+                self.attached_device = json.loads(file.read())
+
+            print("Loaded device: %s" % self.attached_device["name"])
+        else:
+            raise ValueError("Cannot load file. Expected a .json extension.")
 
     def attach_device(self, device_data):
+        """
+        Assigns a specific instance of a discovered device as the class default device
+        :param device_data: One of the devices from found_devices()
+        """
         self.attached_device = device_data
 
-    @property
-    def port(self):
-        return self.attached_device['usb_port']
+    def get_port_from_serial(self, serial):
+        assert(isinstance(serial, int))
 
-    @property
-    def name(self):
-        return self.attached_device['name']
+        # Make sure the STLink devices are discovered
+        self._get_usb_devices()
 
-    @property
-    def serial_number(self):
-        return self.attached_device['serial']
+        for usb_device in self.usb_devices:
+            # The port is listed as "/~/~/bus/addr
+            port_split = list(filter(None, usb_device["device"].split('/')))
+            usb_port = port_split[3] + ":" + port_split[4]
 
-    @property
-    def chip_id(self):
-        return self.attached_device['chipid']
+            if serial == self.get_serial_number(usb_port):
+                return usb_port
+
+        return None
+
+    def get_serial_number(self, port):
+        """
+        Gets the serial number of an STLink device on a given USB bus and address in the format <BUS>:<ADDR>
+        :return: (int) serial number
+        """
+        command = "export STLINK_DEVICE=" + port + "; st-info --serial"
+        raw_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE)
+
+        if raw_output.returncode == 0:
+            return int(raw_output.stdout.decode('utf-8').strip('\n'))
+        else:
+            return -1
 
     def _get_usb_devices(self):
         """
@@ -118,7 +154,8 @@ class STLink_USBInterface:
     def _stlink_probe(self):
         """
         Utilizes the open source stlink software to probe for connected STLink programmers. Should any be
-        found, they are added to the class as a discovered device.
+        found, they are added to the class as a discovered device. Unfortunately no information about the
+        USB bus they are connected to is given, so use _get_usb_devices() for that.
         """
         raw_output = subprocess.run("st-info --probe", shell=True, stdout=subprocess.PIPE)
 
@@ -136,7 +173,7 @@ class STLink_USBInterface:
             for i in range(0, total_found):
                 self.stlink_devices.append({})
 
-                # Info is given in blocks of 6 lines that must be parsed
+                # Info is given in repeating blocks of 6 lines that must be parsed
                 offset = i*6
                 device_data = probe_data[0+offset:6+offset]
 
@@ -155,86 +192,87 @@ class STLink_USBInterface:
 
     def _assign_port_to_device(self):
         """
-        Pairs discovered STLink programmers with the correct USB port/bus
-        :return:
+        Pairs discovered STLink programmers with the correct USB port/bus in the device dictionary
         """
         for i in range(0, len(self.stlink_devices)):
             self.stlink_devices[i]['usb_port'] = self.get_port_from_serial(self.stlink_devices[i]['serial'])
 
-    def get_port_from_serial(self, serial):
-        assert(isinstance(serial, int))
+    @property
+    def port(self):
+        return self.attached_device['usb_port']
 
-        # Make sure the STLink devices are discovered
-        self._get_usb_devices()
+    @property
+    def name(self):
+        return self.attached_device['name']
 
-        for usb_device in self.usb_devices:
-            port_split = list(filter(None, usb_device["device"].split('/')))
-            usb_port = port_split[3] + ":" + port_split[4]
+    @property
+    def serial_number(self):
+        return self.attached_device['serial']
 
-            if serial == self.get_serial_number(usb_port):
-                return usb_port
+    @property
+    def chip_id(self):
+        return self.attached_device['chipid']
 
-    def get_serial_number(self, port):
-        """
-        Gets the serial number of an STLink device on a given USB bus and address in the format <BUS>:<ADDR>
-        :return: (int) serial number
-        """
-        command = "export STLINK_DEVICE=" + port + "; st-info --serial"
-        raw_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE)
+    @property
+    def found_devices(self):
+        return self.stlink_devices
 
-        return int(raw_output.stdout.decode('utf-8').strip('\n'))
-
-
-
-
-# Will need to set the environment variable for programming
 
 class STLink:
     """
     High level interface to an STLink device that defines commonly used operations
     """
     def __init__(self, usb_dev):
-
         # Make sure the USB port recorded in the interface matches the recorded serial number
         if usb_dev.serial_number != usb_dev.get_serial_number(usb_dev.port):
-            print("Serial number %d previously found on port %s" % (usb_dev.serial_number, usb_dev.port))
-            usb_dev.attached_device['usb_port'] = usb_dev.get_serial_number(usb_dev.port)
-            print("Rediscovered on port %s" % usb_dev.port)
+            print("Device %s not found. Previously used on port %s." % (usb_dev.name, usb_dev.port))
+            usb_dev.attached_device['usb_port'] = usb_dev.get_port_from_serial(usb_dev.serial_number)
+
+            if not usb_dev.port:
+                raise ConnectionError("Device %s has disappeared! Where did it go?" % usb_dev.name)
+
+            print("Device %s rediscovered on port %s." % (usb_dev.name, usb_dev.port))
+
 
         self.stlink = usb_dev
 
-    def get_version(self):
-        pass
-
     def erase(self):
+        """
+        Performs a mass erase on the attached STLink device
+        """
         command = "export STLINK_DEVICE=" + self.stlink.port + "; st-flash erase"
-
-        raw_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE)
-        return raw_output.stdout.decode('utf-8')
+        subprocess.run(command, shell=True)
 
     def flash(self, binary_file, link_address="0x08000000"):
+        """
+        Flashes the attached STLink device
+        :param binary_file: absolute path to the binary to be flashed
+        :param link_address: program flash link address, defaults to 0x08000000
+        """
         command = "export STLINK_DEVICE=" + self.stlink.port + "; st-flash write " + binary_file + " " + link_address
-
-        raw_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE)
-        return raw_output.stdout.decode('utf-8')
+        subprocess.run(command, shell=True)
 
     def reset(self):
+        """
+        Resets the attached STLink device
+        """
         command = "export STLINK_DEVICE=" + self.stlink.port + "; st-flash reset"
-
-        raw_output = subprocess.run(command, shell=True, stdout=subprocess.PIPE)
-        return raw_output.stdout.decode('utf-8')
+        subprocess.run(command, shell=True)
 
 
 if __name__ == "__main__":
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+
     usb = STLink_USBInterface()
 
-    usb.discover_devices()
-    usb.save_device("testData", usb.stlink_devices[0], "testData")
-    usb.load_device("testData.json")
+    #usb.discover_devices()
+    #usb.attach_device(usb.found_devices[0])
+    #usb.save_device("stm32f767zit", "test.json")
+    usb.load_device("test.json")
 
     stlink = STLink(usb)
-    #print(stlink.reset())
-    #print(stlink.erase())
-    print(stlink.flash("TestBinaries/STM32F7xx/ChimeraDevelopment.bin"))
+    #stlink.reset()
+    #stlink.erase()
+    stlink.flash(os.path.join(dir_path, "TestBinaries/STM32F7xxx/ChimeraDevelopment.bin"))
 
 
